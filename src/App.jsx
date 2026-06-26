@@ -477,6 +477,12 @@ FIXED FACILITATION PRINCIPLES (always include):
 3. Draw out quieter voices deliberately — do not let the loudest person fill the room.
 4. Close with explicit actions: who will do what by when.
 
+OUTPUT RULES (apply to every section below, without exception):
+- Plain text only. No markdown of any kind. No asterisks for bold or emphasis, no ## or ### headings, no hyphen, asterisk, or bullet lists, no backticks, and no hashtags or tags of any kind anywhere (never end with something like "#management"). Where you need structure, use plain labels followed by a colon, or a simple numbered list written inline as "1. ... 2. ...".
+- No exclamation marks anywhere.
+- No rallying-cry or cheerleading. Close on something concrete and useful, not encouragement.
+- UK English throughout. Plain, direct. Active voice.
+
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
 FACILITATOR_NOTE: [One sentence — the single most important thing for ${prepForm.managerName} to hold in mind running this meeting.]
@@ -500,11 +506,16 @@ WHAT THE MANAGER CAPTURED DURING THE MEETING:
 - Decisions made: ${closeForm.decisionsNotes || "Not recorded separately"}
 - Anything unresolved: ${closeForm.anythingUnresolved || "Nothing noted"}
 
+OUTPUT RULES (apply to every section below, without exception):
+- Plain text only. No markdown of any kind. No asterisks, no ## headings, no bullet lists, no backticks, and no hashtags or tags anywhere (never end with something like "#management").
+- No exclamation marks. No cheerleading.
+- UK English throughout. Plain, direct, professional. Active voice.
+
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
-ACTIONS_SUMMARY: [A clean, formatted actions summary ready to send to all attendees. Format each action as: ACTION | OWNER | BY WHEN. Use the manager's notes as the basis — infer reasonable deadlines if not specified. Add a brief intro line confirming the meeting outcome. Professional, clear, ready to send. Minimum 150 words.]
+ACTIONS_SUMMARY: [A clean actions summary ready to send to all attendees. Write each action on its own line in the form: Action — Owner — By when (a plain dash between the three parts is fine; this is not markdown). Use the manager's notes as the basis. For the "by when": if the manager's note gives a date or a relative time (for example "by Friday", "next week", "before the next meeting"), use it exactly as written. If no timing is given for an action, write [by when] as a plain blank for the manager to fill in. Never invent or guess a specific calendar date — do not write an absolute date that was not in the manager's notes. Begin with a brief intro line confirming the meeting outcome. Professional, clear, ready to send. Minimum 150 words.]
 
-FOLLOWUP_NOTE: [A brief follow-up note from ${prepForm.managerName} to the group. Warm, direct, professional. Summarises what was achieved, confirms the actions list is attached, and states the next meeting date if relevant. Leave [next meeting date] as a placeholder if not known. Minimum 100 words.]
+FOLLOWUP_NOTE: [A brief follow-up note written by ${prepForm.managerName} and addressed to the whole group who attended, never to one named individual. Do not give the note a meeting label or title such as "Coaching Meeting 1" — it is simply a note to the group after the meeting. Warm, direct, professional. It summarises what the meeting achieved, confirms the actions list is attached, and states the next meeting date if one is known. If the next date is not known, write [next meeting date] as a plain blank for the manager to fill in — do not invent a date. Minimum 100 words.]
 
 PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, not for sharing. Three short observations: one thing that likely went well based on the context, one thing to watch for next time given this meeting type and group, and one specific improvement to try. Honest and practical. Minimum 80 words.]`;
 
