@@ -482,6 +482,7 @@ OUTPUT RULES (apply to every section below, without exception):
 - No exclamation marks anywhere.
 - No rallying-cry or cheerleading. Close on something concrete and useful, not encouragement.
 - UK English throughout. Plain, direct. Active voice.
+- In sentences, do not use em dashes: use a comma, a colon, or a full stop instead. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
@@ -510,6 +511,7 @@ OUTPUT RULES (apply to every section below, without exception):
 - Plain text only. No markdown of any kind. No asterisks, no ## headings, no bullet lists, no backticks, and no hashtags or tags anywhere (never end with something like "#management").
 - No exclamation marks. No cheerleading.
 - UK English throughout. Plain, direct, professional. Active voice.
+- In sentences, do not use em dashes: use a comma, a colon, or a full stop instead. The dash separators in the actions summary format below are the one exception and should be kept. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
