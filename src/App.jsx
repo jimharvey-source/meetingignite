@@ -285,9 +285,9 @@ function UpgradeModal({ onClose, triggered }) {
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ width: 52, height: 52, background: RED_LIGHT, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", fontSize: 22 }}>★</div>
           <h2 style={{ fontSize: 22, fontWeight: 700, color: COLORS.navy, margin: "0 0 8px", fontFamily: "sans-serif" }}>
-            {triggered === "limit" ? "You have used your 3 free meetings" : "Unlock MeetingIgnite"}
+            {triggered === "limit" ? "You have used your 3 free meetings" : triggered === "pdf" ? "Download this as a branded PDF" : "Unlock MeetingIgnite"}
           </h2>
-          <p style={{ fontSize: 14, color: COLORS.muted, margin: 0, lineHeight: 1.6, fontFamily: "sans-serif" }}>Unlimited meeting guides, agenda builder, facilitation notes, actions summaries, and follow-up notes.</p>
+          <p style={{ fontSize: 14, color: COLORS.muted, margin: 0, lineHeight: 1.6, fontFamily: "sans-serif" }}>{triggered === "pdf" ? "Pro lets you download the whole meeting, agenda, facilitation guide, and after the meeting the actions summary, follow-up note and process review, as a branded PDF." : "Unlimited meeting guides, agenda builder, facilitation notes, actions summaries, and follow-up notes."}</p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           {plans.map(plan => (
@@ -597,6 +597,29 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, n
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const downloadPdf = async () => {
+    if (!prepResult) return;
+    if (!isPro) { setUpgradeTrigger("pdf"); setShowUpgrade(true); return; }
+    setDownloadingPdf(true);
+    try {
+      const res = await fetch("/api/generate-pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tool: "meeting", prepForm, prepResult, closeResult }) });
+      if (!res.ok) throw new Error("PDF generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const title = prepResult.meetingTitle ? ` - ${prepResult.meetingTitle}` : "";
+      a.download = `Meeting Ignite${title}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError("The PDF could not be generated. Please try again.");
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut(); setUser(null); setIsPro(false);
     try { localStorage.removeItem("mi_pro"); } catch {}
@@ -879,7 +902,10 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, n
 
                 <div style={{ background: COLORS.slateLight, borderRadius: 10, padding: "14px 18px", border: `1px solid ${COLORS.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
                   <p style={{ fontSize: 13, color: COLORS.muted, margin: 0, fontFamily: "sans-serif" }}>Both outputs are editable. Adjust to fit your voice before sharing.</p>
-                  <button onClick={resetAll} style={{ fontSize: 13, padding: "7px 16px", background: COLORS.white, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.navy, cursor: "pointer", fontFamily: "sans-serif", fontWeight: 500 }}>New meeting</button>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <button onClick={downloadPdf} disabled={downloadingPdf} style={{ fontSize: 13, padding: "7px 16px", background: RED, border: "none", borderRadius: 8, color: COLORS.white, cursor: downloadingPdf ? "default" : "pointer", fontFamily: "sans-serif", fontWeight: 600, opacity: downloadingPdf ? 0.7 : 1 }}>{downloadingPdf ? "Preparing PDF..." : (isPro ? "Download PDF" : "Download PDF (Pro)")}</button>
+                    <button onClick={resetAll} style={{ fontSize: 13, padding: "7px 16px", background: COLORS.white, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.navy, cursor: "pointer", fontFamily: "sans-serif", fontWeight: 500 }}>New meeting</button>
+                  </div>
                 </div>
               </div>
             )}
@@ -963,7 +989,10 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, n
 
                 <div style={{ background: COLORS.slateLight, borderRadius: 10, padding: "14px 18px", border: `1px solid ${COLORS.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
                   <p style={{ fontSize: 13, color: COLORS.muted, margin: 0, fontFamily: "sans-serif" }}>All outputs are editable. Send within 24 hours while actions are fresh.</p>
-                  <button onClick={resetAll} style={{ fontSize: 13, padding: "7px 16px", background: COLORS.white, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.navy, cursor: "pointer", fontFamily: "sans-serif", fontWeight: 500 }}>New meeting</button>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <button onClick={downloadPdf} disabled={downloadingPdf} style={{ fontSize: 13, padding: "7px 16px", background: RED, border: "none", borderRadius: 8, color: COLORS.white, cursor: downloadingPdf ? "default" : "pointer", fontFamily: "sans-serif", fontWeight: 600, opacity: downloadingPdf ? 0.7 : 1 }}>{downloadingPdf ? "Preparing PDF..." : (isPro ? "Download full PDF" : "Download full PDF (Pro)")}</button>
+                    <button onClick={resetAll} style={{ fontSize: 13, padding: "7px 16px", background: COLORS.white, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.navy, cursor: "pointer", fontFamily: "sans-serif", fontWeight: 500 }}>New meeting</button>
+                  </div>
                 </div>
               </div>
             )}
