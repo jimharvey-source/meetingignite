@@ -1,19 +1,13 @@
+// The tools send { messages }. Everything model-specific lives in lib/llm.js.
+// The reply keeps the OpenAI envelope on purpose: see asChatCompletion there.
+import { complete, asChatCompletion } from '../lib/llm.js';
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      max_tokens: 4000,
-      messages: req.body.messages,
-    }),
-  });
+  const { messages, fast } = req.body || {};
+  const result = await complete({ messages, maxTokens: 4000, fast: Boolean(fast) });
 
-  const data = await response.json();
-  res.status(200).json(data);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  return res.status(200).json(asChatCompletion(result.text));
 }
