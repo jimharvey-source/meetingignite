@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { parseSharpened } from "./mi-session.js";
 
 const supabase = createClient(
   "https://fdiitxhgfytvlbtokbok.supabase.co",
@@ -446,7 +447,7 @@ A good meeting outcome describes what will be DECIDED, AGREED or PRODUCED — no
 Respond in EXACTLY this format:
 STATUS: [PASS or FAIL]
 REASON: [One plain sentence.]
-SHARPENED: [If FAIL, rewrite as a specific outcome. If PASS, repeat original unchanged.]`;
+SHARPENED: [If FAIL, rewrite as a specific outcome, one sentence at most. If PASS, repeat original unchanged. Write nothing after it.]`;
 
   const buildPrepPrompt = (outcome) => {
     const mt = MEETING_TYPES[prepForm.meetingType];
@@ -534,7 +535,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, n
         const text = d.choices?.[0]?.message?.content || "";
         const status = (text.match(/STATUS:\s*(PASS|FAIL)/i)?.[1] || "PASS").toUpperCase();
         const reason = text.match(/REASON:\s*(.+)/i)?.[1]?.trim() || "";
-        const sharpened = text.match(/SHARPENED:\s*([\s\S]+)/i)?.[1]?.trim() || prepForm.desiredOutcome;
+        const sharpened = parseSharpened(text, prepForm.desiredOutcome, 250);
         if (status === "PASS") { setSharpenedOutcome(prepForm.desiredOutcome); setOutcomeAccepted(true); await runPrepGenerate(prepForm.desiredOutcome); }
         else { setOutcomeCheck({ reason, sharpened }); setSharpenedOutcome(sharpened); setLoading(false); }
       } catch { setError("Something went wrong. Please try again."); setLoading(false); }
