@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   const { messages, fast } = req.body || {};
-  const result = await complete({ messages, maxTokens: 4000, fast: Boolean(fast) });
+  const result = await complete({ messages, maxTokens: 16000, effort: 'low', fast: Boolean(fast) });
 
   if (!result.ok) return res.status(result.status).json({ error: result.error });
   return res.status(200).json(asChatCompletion(result.text));
