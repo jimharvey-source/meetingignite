@@ -622,3 +622,18 @@ textarea.output-area:focus {
   .hero h1 { font-size: 1.7rem; }
   .footer-inner { flex-direction: column; align-items: flex-start; }
 }
+
+
+/* Management Ignition restyle, 5 October 2026.
+   The tool's components are styled inline in App.jsx; these rules cover what
+   inline styles cannot: the page ground, focus states and placeholders. */
+:root {
+  --font-display: "Instrument Sans", -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-body: "Instrument Sans", -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  --ink: #1b2a4a;
+}
+body { background: #f6f8fb; color: #1b2a4a; font-family: var(--font-body); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: #1b2a4a !important; box-shadow: 0 0 0 1px #1b2a4a !important; }
+button:focus-visible, a:focus-visible { outline: 2px solid #1b2a4a; outline-offset: 2px; }
+input::placeholder, textarea::placeholder { color: #5d6b7f; opacity: 1; }
+button:disabled { cursor: not-allowed; }
