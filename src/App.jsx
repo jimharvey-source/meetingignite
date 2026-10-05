@@ -85,7 +85,7 @@ function getFacilitationMode(meetingType, groupExperience) {
   return {
     mode: "Collaborative", color: COLORS.blue, colorLight: COLORS.blueLight,
     summary: "Share the process with the group. You shape the structure, they own the content. This produces better decisions and stronger commitment.",
-    tip: "Invite contributions explicitly. Do not let silence mean consent — check for genuine agreement before moving on.",
+    tip: "Invite contributions explicitly. Do not let silence mean consent: check for genuine agreement before moving on.",
   };
 }
 
@@ -94,12 +94,12 @@ function getFacilitationMode(meetingType, groupExperience) {
 function getCadenceGuidance(meetingType, frequency) {
   if (meetingType === "team") {
     if (frequency === "weekly") return {
-      recommendation: "Weekly is right for most teams — enough rhythm to maintain alignment without becoming overhead. Keep them short: 45–60 minutes maximum.",
+      recommendation: "Weekly is right for most teams: enough rhythm to maintain alignment without becoming overhead. Keep them short: 45–60 minutes maximum.",
       tip: "If your weekly meeting regularly runs over 60 minutes, the agenda needs redesigning. Move status updates async and use the time only for decisions and blockers.",
     };
     if (frequency === "fortnightly") return {
       recommendation: "Fortnightly works well for stable teams where day-to-day coordination happens informally. Supplement with a brief async update on the off weeks.",
-      tip: "A fortnightly rhythm requires a more structured agenda — more ground to cover, less time to drift.",
+      tip: "A fortnightly rhythm requires a more structured agenda: more ground to cover, less time to drift.",
     };
     return {
       recommendation: "Monthly team meetings work only when the team has strong informal communication. Use them for bigger-picture review rather than operational detail.",
@@ -461,7 +461,7 @@ DESIRED OUTCOME: ${prepForm.desiredOutcome}
 
 Decide whether the outcome is specific enough to run a productive meeting.
 
-A good meeting outcome describes what will be DECIDED, AGREED or PRODUCED — not just what will be discussed. "Discuss the project" is a topic, not an outcome. "Agree the three priorities for Q3 and assign owners" is an outcome.
+A good meeting outcome describes what will be DECIDED, AGREED or PRODUCED: not just what will be discussed. "Discuss the project" is a topic, not an outcome. "Agree the three priorities for Q3 and assign owners" is an outcome.
 
 Respond in EXACTLY this format:
 STATUS: [PASS or FAIL]
@@ -492,9 +492,9 @@ MEETING TYPE CONTEXT:
 CADENCE: ${cad?.recommendation || ""}
 
 FIXED FACILITATION PRINCIPLES (always include):
-1. Send the agenda in advance — never brief people cold on the day.
+1. Send the agenda in advance: never brief people cold on the day.
 2. State the desired outcome at the start of the meeting, not just the topics.
-3. Draw out quieter voices deliberately — do not let the loudest person fill the room.
+3. Draw out quieter voices deliberately: do not let the loudest person fill the room.
 4. Close with explicit actions: who will do what by when.
 
 OUTPUT RULES (apply to every section below, without exception):
@@ -506,7 +506,7 @@ OUTPUT RULES (apply to every section below, without exception):
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
-FACILITATOR_NOTE: [One sentence — the single most important thing for ${prepForm.managerName} to hold in mind running this meeting.]
+FACILITATOR_NOTE: [One sentence: the single most important thing for ${prepForm.managerName} to hold in mind running this meeting.]
 
 AGENDA: [A structured, timed agenda for this meeting. Include: opening (state outcome and ground rules), each agenda item with suggested time allocation, and a close (actions review and next steps). Format each item clearly. Tailor to the meeting type and outcome. Minimum 300 words.]
 
@@ -535,11 +535,11 @@ OUTPUT RULES (apply to every section below, without exception):
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
-ACTIONS_SUMMARY: [A clean actions summary ready to send to all attendees. Write each action on its own line in the form: Action — Owner — By when (a plain dash between the three parts is fine; this is not markdown). Use the manager's notes as the basis. For the "by when": if the manager's note gives a date or a relative time (for example "by Friday", "next week", "before the next meeting"), use it exactly as written. If no timing is given for an action, write [by when] as a plain blank for the manager to fill in. Never invent or guess a specific calendar date — do not write an absolute date that was not in the manager's notes. Begin with a brief intro line confirming the meeting outcome. Professional, clear, ready to send. Minimum 150 words.]
+ACTIONS_SUMMARY: [A clean actions summary ready to send to all attendees. Write each action on its own line in the form: Action - Owner - By when (a plain hyphen between the three parts, never a long dash; this is not markdown). Use the manager's notes as the basis. For the "by when": if the manager's note gives a date or a relative time (for example "by Friday", "next week", "before the next meeting"), use it exactly as written. If no timing is given for an action, write [by when] as a plain blank for the manager to fill in. Never invent or guess a specific calendar date: do not write an absolute date that was not in the manager's notes. Begin with a brief intro line confirming the meeting outcome. Professional, clear, ready to send. Minimum 150 words.]
 
-FOLLOWUP_NOTE: [A brief follow-up note written by ${prepForm.managerName} and addressed to the whole group who attended, never to one named individual. Do not give the note a meeting label or title such as "Coaching Meeting 1" — it is simply a note to the group after the meeting. Warm, direct, professional. It summarises what the meeting achieved, confirms the actions list is attached, and states the next meeting date if one is known. If the next date is not known, write [next meeting date] as a plain blank for the manager to fill in — do not invent a date. Minimum 100 words.]
+FOLLOWUP_NOTE: [A brief follow-up note written by ${prepForm.managerName} and addressed to the whole group who attended, never to one named individual. Do not give the note a meeting label or title such as "Coaching Meeting 1": it is simply a note to the group after the meeting. Warm, direct, professional. It summarises what the meeting achieved, confirms the actions list is attached, and states the next meeting date if one is known. If the next date is not known, write [next meeting date] as a plain blank for the manager to fill in: do not invent a date. Minimum 100 words.]
 
-PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName} — private, not for sharing. Three short observations: one thing that likely went well based on the context, one thing to watch for next time given this meeting type and group, and one specific improvement to try. Honest and practical. Minimum 80 words.]`;
+PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not for sharing. Three short observations: one thing that likely went well based on the context, one thing to watch for next time given this meeting type and group, and one specific improvement to try. Honest and practical. Minimum 80 words.]`;
 
   const generatePrep = async () => {
     const err = validatePrep();
