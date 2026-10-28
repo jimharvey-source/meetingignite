@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import MethodLink from "./MethodLink.jsx";
 import { createClient } from "@supabase/supabase-js";
 import { parseSharpened } from "./mi-session.js";
 
@@ -671,6 +672,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <a href={DASHBOARD_URL} style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans, textDecoration: "none" }}>Back to dashboard</a>
+            <MethodLink slug="meetings" style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans }} />
             <button onClick={() => setShowHistory(true)} style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans }}>History</button>
             {user ? (
               <>
