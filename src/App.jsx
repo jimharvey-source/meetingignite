@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import MethodLink from "./MethodLink.jsx";
-import { createSuiteClient, hasSuiteAccess, parseSharpened } from "./mi-session.js";
-import { saveMeeting, updateMeetingOutputs, listMeetings } from "./meeting-record.js";
+import { createSuiteClient, hasSuiteAccess, parseSharpened, personIdFromUrl } from "./mi-session.js";
+import {
+  saveMeeting, updateMeetingOutputs, listMeetings,
+  listTeam, loadPersonContext, assembleOneToOne, buildOneToOneAgenda, parseQuestions,
+} from "./meeting-record.js";
 
 
 // The way back to the app, from the header and from the end of every result.
@@ -64,6 +67,12 @@ const SHADOW = "0 1px 2px rgba(27,42,74,0.05), 0 18px 44px -28px rgba(27,42,74,0
 // ─── Meeting type config ──────────────────────────────────────────────────────
 
 const MEETING_TYPES = {
+  oneToOne: {
+    label: "1-1",
+    desc: "A regular one-to-one with one person, built from their record.",
+    recommendedTools: ["Listen first, then respond", "Close with actions they own"],
+    outcomeHint: "Optional. e.g. Agree the pricing recommendation Sarah takes to Harland",
+  },
   team: {
     label: "Team meeting",
     desc: "Regular team alignment, decisions, and updates.",
@@ -87,6 +96,11 @@ const MEETING_TYPES = {
 // ─── Facilitation mode logic ──────────────────────────────────────────────────
 
 function getFacilitationMode(meetingType, groupExperience) {
+  if (meetingType === "oneToOne") return {
+    mode: "Person-led", color: COLORS.blue, colorLight: COLORS.blueLight,
+    summary: "They speak first on every item. You listen, then respond. Awareness and responsibility stay with them.",
+    tip: "Ask before you tell. Close each item with what they will do and by when.",
+  };
   if (groupExperience === "new" || meetingType === "kickoff") return {
     mode: "Directive", color: COLORS.red2, colorLight: "#FEF2F2",
     summary: "Lead the structure clearly. Set the agenda, manage the process, and make the meeting safe for people who do not yet know the norms.",
@@ -107,6 +121,20 @@ function getFacilitationMode(meetingType, groupExperience) {
 // ─── Cadence logic ────────────────────────────────────────────────────────────
 
 function getCadenceGuidance(meetingType, frequency) {
+  if (meetingType === "oneToOne") {
+    if (frequency === "weekly") return {
+      recommendation: "Weekly suits someone new to the role, or work with a lot riding on it. Thirty minutes is usually enough.",
+      tip: "Keep the slot. If you have to move it, move it, and say when it will happen.",
+    };
+    if (frequency === "fortnightly") return {
+      recommendation: "Fortnightly suits most people: often enough to catch drift early, with room for real progress in between.",
+      tip: "Book the next one before this one ends.",
+    };
+    return {
+      recommendation: "Monthly is the minimum. Any longer and the 1-1 becomes a review of things already decided.",
+      tip: "Book the next one before this one ends.",
+    };
+  }
   if (meetingType === "team") {
     if (frequency === "weekly") return {
       recommendation: "Weekly is right for most teams: enough rhythm to maintain alignment without becoming overhead. Keep them short: 45–60 minutes maximum.",
@@ -248,6 +276,60 @@ function ToggleGroup({ label, value, onChange, options, hint }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── The 1-1 panel ────────────────────────────────────────────────────────────
+
+function OneToOnePanel({ user, team, teamState, personId, onPerson, ctx, ctxState, included, onToggle, managerItems, onManagerItems }) {
+  const label = { display: "block", fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: COLORS.muted, marginBottom: 8, fontFamily: FONT.sans };
+  if (!user) return (
+    <p style={{ fontSize: 14, color: COLORS.navy, background: COLORS.amberLight, borderRadius: 10, padding: "12px 16px", margin: "0 0 16px", fontFamily: FONT.sans, lineHeight: "20px" }}>
+      Sign in to build a 1-1 from the person's record.
+    </p>
+  );
+  const first = ctx?.person?.first_name;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <label style={label}>Who is the 1-1 with? <span style={{ color: COLORS.red2 }}>*</span></label>
+      {teamState === "error"
+        ? <p role="alert" style={{ fontSize: 14, color: COLORS.red2, margin: "0 0 12px", fontFamily: FONT.sans }}>Your team could not be loaded. Reload the page to try again.</p>
+        : <select value={personId} onChange={e => onPerson(e.target.value)}
+            style={{ width: "100%", minHeight: 44, padding: "10px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 10, fontSize: 15, color: COLORS.text, background: COLORS.white, fontFamily: FONT.sans, marginBottom: 16 }}>
+            <option value="">{teamState === "loading" ? "Loading your team..." : team.length ? "Choose someone on your team" : "No one on your team yet"}</option>
+            {team.map(p => <option key={p.id} value={p.id}>{[p.first_name, p.last_name].filter(Boolean).join(" ")}{p.role_title ? `, ${p.role_title}` : ""}</option>)}
+          </select>}
+
+      {personId && ctxState === "loading" && <p style={{ fontSize: 14, color: COLORS.muted, margin: "0 0 16px", fontFamily: FONT.sans }}>Reading their record...</p>}
+      {personId && ctxState === "error" && (
+        <p role="alert" style={{ fontSize: 14, color: COLORS.navy, background: COLORS.amberLight, borderRadius: 10, padding: "12px 16px", margin: "0 0 16px", fontFamily: FONT.sans, lineHeight: "20px" }}>
+          Their record could not be loaded, so the agenda cannot be built from it. Reload the page to try again.
+        </p>
+      )}
+      {ctx && ctxState === "ready" && (
+        <div style={{ background: COLORS.tealLight, borderRadius: 10, padding: "16px 20px", marginBottom: 16 }}>
+          <p style={{ fontSize: 15, fontWeight: 600, color: COLORS.navy, margin: "0 0 4px", fontFamily: FONT.sans }}>From {first}'s record</p>
+          <p style={{ fontSize: 13, color: COLORS.navyMid, margin: "0 0 12px", fontFamily: FONT.sans, lineHeight: 1.5 }}>
+            {ctx.lastOneToOne ? `Last 1-1: ${ctx.lastOneToOne}.` : "No 1-1 on the record yet."} The agenda is built from these. Untick anything you will not cover.
+          </p>
+          {ctx.items.length === 0 && <p style={{ fontSize: 14, color: COLORS.navy, margin: "0 0 8px", fontFamily: FONT.sans }}>Nothing open on {first}'s record yet. Add your own items below.</p>}
+          {ctx.items.map(it => (
+            <label key={it.key} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: COLORS.white, borderRadius: 10, padding: "10px 12px", marginBottom: 8, cursor: "pointer", fontFamily: FONT.sans }}>
+              <input type="checkbox" checked={included.includes(it.key)} onChange={() => onToggle(it.key)} style={{ width: 18, height: 18, marginTop: 2, accentColor: COLORS.navy, flexShrink: 0 }} />
+              <span>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: COLORS.navy, marginBottom: 2 }}>
+                  {it.title}{it.overdue && <span style={{ color: COLORS.red2, fontWeight: 600 }}> · overdue</span>}
+                </span>
+                {it.lines.map((l, i) => <span key={i} style={{ display: "block", fontSize: 13, color: COLORS.navyMid, lineHeight: "19px" }}>{l}</span>)}
+              </span>
+            </label>
+          ))}
+          <label style={{ ...label, marginTop: 12 }}>Anything else you want to cover</label>
+          <textarea value={managerItems} onChange={e => onManagerItems(e.target.value)} rows={3} placeholder="One item per line"
+            style={{ width: "100%", padding: "10px 16px", border: `1px solid ${COLORS.border}`, borderRadius: 10, fontSize: 15, color: COLORS.text, background: COLORS.white, boxSizing: "border-box", fontFamily: FONT.sans, resize: "vertical" }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -401,6 +483,7 @@ export default function MeetingIgnite() {
     managerName: "", meetingTitle: "", meetingType: "",
     desiredOutcome: "", attendees: "", duration: "",
     groupExperience: "", frequency: "",
+    personId: "", managerItems: "",
   });
 
   // Close form (actions captured after the meeting)
@@ -422,6 +505,13 @@ export default function MeetingIgnite() {
   // The meeting as saved on the record: the close is added to the same row.
   const [savedMeeting, setSavedMeeting] = useState(null);
   const [saveNote, setSaveNote] = useState("");
+  // The 1-1: the team to choose from, and what the chosen person's record holds.
+  const [team, setTeam] = useState([]);
+  const [teamState, setTeamState] = useState("idle");
+  const [oneCtx, setOneCtx] = useState(null);
+  const [ctxState, setCtxState] = useState("idle");
+  const [included, setIncluded] = useState([]);
+  const isOneToOneForm = prepForm.meetingType === "oneToOne";
   const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("mi_pro") === "true"; } catch { return false; } });
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [user, setUser] = useState(null);
@@ -451,6 +541,56 @@ export default function MeetingIgnite() {
     return () => { cancelled = true; };
   }, [user]);
 
+  // The team, for choosing who a 1-1 is with. A person sent from the app opens a 1-1 with them.
+  useEffect(() => {
+    if (!user) { setTeam([]); setTeamState("idle"); return; }
+    let cancelled = false;
+    setTeamState("loading");
+    listTeam(supabase).then(({ data, error: teamError }) => {
+      if (cancelled) return;
+      setTeam(data);
+      setTeamState(teamError ? "error" : "ready");
+    });
+    const sent = personIdFromUrl();
+    if (sent) setPrepForm(p => ({ ...p, meetingType: "oneToOne", personId: p.personId || sent, frequency: p.frequency || "monthly" }));
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Read the chosen person's record and assemble the agenda items from it.
+  useEffect(() => {
+    if (!user || prepForm.meetingType !== "oneToOne" || !prepForm.personId) { setOneCtx(null); setCtxState("idle"); return; }
+    let cancelled = false;
+    setCtxState("loading"); setOneCtx(null);
+    loadPersonContext(supabase, prepForm.personId).then(({ data, error: ctxError }) => {
+      if (cancelled) return;
+      if (ctxError || !data) { setCtxState("error"); return; }
+      const assembled = assembleOneToOne(data);
+      setOneCtx({ person: data.person, ...assembled });
+      setIncluded(assembled.items.map(it => it.key));
+      setCtxState("ready");
+      const first = data.person.first_name;
+      setPrepForm(p => ({ ...p, meetingTitle: p.meetingTitle || `1-1 with ${first}` }));
+    });
+    return () => { cancelled = true; };
+  }, [user, prepForm.meetingType, prepForm.personId]);
+
+  // A 1-1 is held at least monthly.
+  useEffect(() => {
+    if (prepForm.meetingType === "oneToOne" && !["weekly", "fortnightly", "monthly"].includes(prepForm.frequency)) {
+      setPrepForm(p => ({ ...p, frequency: "monthly" }));
+    }
+  }, [prepForm.meetingType]);
+
+  const toggleIncluded = (key) => setIncluded(list => list.includes(key) ? list.filter(k => k !== key) : [...list, key]);
+
+  // The items the agenda will carry: the record's, as ticked, then the manager's own.
+  const oneToOneItems = () => {
+    const chosen = (oneCtx?.items || []).filter(it => included.includes(it.key));
+    const own = prepForm.managerItems.split("\n").map(s => s.trim()).filter(Boolean)
+      .map((t, i) => ({ key: `own:${i}`, kind: "own", title: t, lines: [`Your item: ${t}`] }));
+    return [...chosen, ...own];
+  };
+
   const openHistory = async () => {
     setShowHistory(true);
     if (!user) return;
@@ -472,7 +612,7 @@ export default function MeetingIgnite() {
   }, []);
 
   useEffect(() => {
-    if (prepForm.meetingType && prepForm.groupExperience) {
+    if (prepForm.meetingType === "oneToOne" || (prepForm.meetingType && prepForm.groupExperience)) {
       setFacilitationMode(getFacilitationMode(prepForm.meetingType, prepForm.groupExperience));
     } else setFacilitationMode(null);
     if (prepForm.meetingType && prepForm.frequency) {
@@ -484,6 +624,12 @@ export default function MeetingIgnite() {
     if (!prepForm.managerName.trim()) return "Your name is required.";
     if (!prepForm.meetingTitle.trim()) return "Meeting title is required.";
     if (!prepForm.meetingType) return "Please select a meeting type.";
+    if (prepForm.meetingType === "oneToOne") {
+      if (!user) return "Sign in to build a 1-1 from the person's record.";
+      if (!prepForm.personId) return "Choose who the 1-1 is with.";
+      if (ctxState !== "ready" || !oneCtx) return "Their record has not loaded yet, so the agenda cannot be built.";
+      return null;
+    }
     if (!prepForm.desiredOutcome.trim()) return "Desired outcome is required.";
     if (!prepForm.groupExperience) return "Please select the group's experience level.";
     return null;
@@ -554,6 +700,54 @@ AGENDA: [A structured, timed agenda for this meeting. Include: opening (state ou
 FACILITATION_GUIDE: [Practical coaching notes for ${prepForm.managerName}. Cover: how to open well, how to manage discussion for this type of meeting, which facilitation technique(s) to use and why, how to draw out quieter voices, how to handle disagreement or dominant voices, and how to close with genuine clarity. Include the fixed principles above. Minimum 350 words.]`;
   };
 
+  const buildOneToOnePrompt = (outcome) => {
+    const first = oneCtx.person.first_name;
+    const manager = prepForm.managerName.trim();
+    const items = oneToOneItems();
+    const record = items.map((it, i) => `Item ${i + 2}. ${it.title}\n${it.lines.map(l => `   ${l}`).join("\n")}`).join("\n");
+    const n = items.length + 1;
+    return `You are helping ${manager} prepare a 1-1 with ${first}, who works for them.
+
+THE RECORD (facts ${manager} saved; use them exactly and add nothing):
+Item 1. ${first}'s own items: whatever ${first} wants to raise.
+${record}
+
+Last 1-1 on the record: ${oneCtx.lastOneToOne || "none yet"}
+Purpose ${manager} gave for this 1-1: ${outcome || "not given"}
+How often they meet: ${prepForm.frequency || "monthly"}
+Length: ${prepForm.duration || "not given"}
+
+HOW ${manager.toUpperCase()} RUNS A 1-1:
+1. Give plenty of notice and ask ${first} to prepare.
+2. ${first} speaks first on every item. Listen first, then respond.
+3. End with clear actions: who does what, by when.
+4. Leave awareness and responsibility with ${first}. Ask before you tell.
+
+ABSOLUTE RULE: never invent a fact about ${first}. Use no date, figure, name, event, document, opinion or feeling that is not in THE RECORD above. Where something is unknown, write it as a [bracket] for ${manager} to fill in. Use ${first}'s first name only.
+
+OUTPUT RULES (apply to every section below, without exception):
+- Plain text only. No markdown of any kind. No asterisks, no ## headings, no bullet lists, no backticks, no hashtags.
+- No exclamation marks. No cheerleading.
+- UK English throughout. Plain, direct, warm. Active voice.
+- Do not use em dashes: use a comma, a colon, or a full stop instead. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
+- Never feed ratings back: do not write "your low confidence" or "your skill level".
+
+YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
+
+FACILITATOR_NOTE: [One sentence for ${manager}: the one thing to hold in mind in this 1-1.]
+
+OPENING: [Two to four sentences from ${manager} to ${first}, sent in advance. Give the time as [date and time]. Ask ${first} to come with their own items and their view on each item below.]
+
+QUESTIONS:
+[Exactly ${n} lines, numbered 1 to ${n}, one for each item in THE RECORD, in the same order. Each line is one question to ${first}, written to them as "you", for them to think about before the 1-1. A question may use only the facts in its own item. Line 1 asks what they want to raise.]
+
+CLOSE: [One sentence asking ${first} to bring their own view on what happens next. Then ${manager.split(" ")[0]} on its own line.]
+
+FACILITATION_GUIDE: [Private notes for ${manager}, 250 to 400 words. How to open so ${first} talks first. For each item, what to listen for and when to respond, using only the facts given. If an overdue action is listed, how to raise it plainly, and own it where it is ${manager}'s. How to close with actions ${first} owns, and to book the next 1-1 before this one ends.]
+
+Invent nothing about ${first}. Every fact you use must appear in THE RECORD.`;
+  };
+
   const buildClosePrompt = () =>
     `You are helping a manager close out a meeting and create a follow-up summary.
 
@@ -587,6 +781,11 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     if (err) { setError(err); return; }
     if (!isPro && usageCount >= FREE_LIMIT) { setUpgradeTrigger("limit"); setShowUpgrade(true); return; }
     setError("");
+    if (isOneToOneForm && !prepForm.desiredOutcome.trim()) {
+      setOutcomeAccepted(true); setSharpenedOutcome("");
+      await runPrepGenerate("");
+      return;
+    }
     if (!outcomeAccepted) {
       setLoading(true); setOutcomeCheck(null);
       try {
@@ -606,6 +805,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
   const runPrepGenerate = async (outcome) => {
     setLoading(true); setPrepResult(null);
     try {
+      if (isOneToOneForm) { await runOneToOneGenerate(outcome); return; }
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildPrepPrompt(outcome) }] }) });
       const text = await modelText(r);
       const noteMatch = text.match(/FACILITATOR_NOTE:\s*([\s\S]+?)(?=AGENDA:|$)/i);
@@ -645,6 +845,54 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
       setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch { setError("Something went wrong. Please try again."); }
     finally { setLoading(false); }
+  };
+
+  // The 1-1: the items come from the record in code; the model writes around them.
+  const runOneToOneGenerate = async (outcome) => {
+    const items = oneToOneItems();
+    const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildOneToOnePrompt(outcome) }] }) });
+    const text = await modelText(r);
+    const grab = (name, next) => text.match(new RegExp(`${name}:\\s*([\\s\\S]+?)(?=${next.map(x => `\\n\\s*${x}:`).join("|") || "$"}|$)`, "i"))?.[1]?.trim() || "";
+    const note = grab("FACILITATOR_NOTE", ["OPENING"]);
+    const opening = grab("OPENING", ["QUESTIONS"]);
+    const questions = parseQuestions(grab("QUESTIONS", ["CLOSE"]));
+    const close = grab("CLOSE", ["FACILITATION_GUIDE"]);
+    const guide = grab("FACILITATION_GUIDE", []);
+    if (!opening && !questions.length && !guide) {
+      console.error("1-1: the reply had none of its sections:", text.slice(0, 300));
+      throw new Error("unreadable reply");
+    }
+    const agenda = buildOneToOneAgenda({ items, questions, opening, close });
+    const parsed = {
+      facilitatorNote: note,
+      agenda,
+      guide,
+      meetingTitle: prepForm.meetingTitle,
+      managerName: prepForm.managerName,
+      meetingType: "oneToOne",
+      outcome,
+      facilitationMode: getFacilitationMode("oneToOne"),
+      cadence: getCadenceGuidance("oneToOne", prepForm.frequency),
+    };
+    setPrepResult(parsed);
+    if (!isPro) { incrementUsage(); setUsageCount(getUsageCount()); }
+    setSavedMeeting(null);
+    const { data: row, error: saveError } = await saveMeeting(supabase, {
+      title: parsed.meetingTitle,
+      personId: oneCtx.person.id,
+      inputs: { ...prepForm, desiredOutcome: outcome, oneToOneWith: oneCtx.person.first_name },
+      outputs: {
+        facilitatorNote: parsed.facilitatorNote,
+        agenda: parsed.agenda,
+        facilitationGuide: parsed.guide,
+        facilitationMode: parsed.facilitationMode,
+        meetingCadence: parsed.cadence,
+        recordItems: items.map(it => ({ key: it.key, kind: it.kind, title: it.title, lines: it.lines, actionId: it.actionId || null })),
+      },
+    });
+    if (saveError) setSaveNote(`This 1-1 could not be saved to ${oneCtx.person.first_name}'s record. Copy anything you need before you leave the page.`);
+    else { setSavedMeeting(row); setSaveNote(`Saved to ${oneCtx.person.first_name}'s record.`); }
+    setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
   };
 
   const generateClose = async () => {
@@ -827,23 +1075,30 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                 </div>
               </div>
 
+              {isOneToOneForm && (
+                <OneToOnePanel user={user} team={team} teamState={teamState}
+                  personId={prepForm.personId} onPerson={id => setPrepForm(p => ({ ...p, personId: id, meetingTitle: "" }))}
+                  ctx={oneCtx} ctxState={ctxState} included={included} onToggle={toggleIncluded}
+                  managerItems={prepForm.managerItems} onManagerItems={pf("managerItems")} />
+              )}
+
               <TextField
-                label="Desired outcome"
+                label={isOneToOneForm ? "Purpose of this 1-1" : "Desired outcome"}
                 value={prepForm.desiredOutcome}
                 onChange={pf("desiredOutcome")}
                 placeholder={prepForm.meetingType ? MEETING_TYPES[prepForm.meetingType]?.outcomeHint : "What will be decided, agreed or produced by the end of this meeting?"}
-                hint="Describe what will be decided or agreed, not just what will be discussed."
-                required multiline
+                hint={isOneToOneForm ? "Optional. The agenda already holds everything open on their record." : "Describe what will be decided or agreed, not just what will be discussed."}
+                required={!isOneToOneForm} multiline
               />
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0 20px" }}>
-                <TextField label="Who will be there" value={prepForm.attendees} onChange={pf("attendees")} placeholder="e.g. Sarah (PM), Tom, Priya, whole design team" />
-                <TextField label="Duration" value={prepForm.duration} onChange={pf("duration")} placeholder="e.g. 60 minutes" />
+                {!isOneToOneForm && <TextField label="Who will be there" value={prepForm.attendees} onChange={pf("attendees")} placeholder="e.g. Sarah (PM), Tom, Priya, whole design team" />}
+                <TextField label="Duration" value={prepForm.duration} onChange={pf("duration")} placeholder={isOneToOneForm ? "e.g. 30 minutes" : "e.g. 60 minutes"} />
               </div>
 
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 20, marginTop: 4 }}>
-                <h3 style={{ fontSize: 17, fontWeight: 600, color: COLORS.navy, margin: "0 0 16px", fontFamily: FONT.sans }}>About the group</h3>
-                <ToggleGroup
+                <h3 style={{ fontSize: 17, fontWeight: 600, color: COLORS.navy, margin: "0 0 16px", fontFamily: FONT.sans }}>{isOneToOneForm ? "How often you meet" : "About the group"}</h3>
+                {!isOneToOneForm && <ToggleGroup
                   label="Group's experience working together"
                   value={prepForm.groupExperience}
                   onChange={pf("groupExperience")}
@@ -852,13 +1107,13 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                     { value: "developing", label: "Developing: meet regularly, still finding rhythm" },
                     { value: "experienced", label: "Experienced: established team, high trust" },
                   ]}
-                />
+                />}
                 <ToggleGroup
-                  label="Meeting frequency (for cadence advice)"
+                  label={isOneToOneForm ? "1-1 frequency (monthly at least)" : "Meeting frequency (for cadence advice)"}
                   value={prepForm.frequency}
                   onChange={pf("frequency")}
                   options={[
-                    { value: "one-off", label: "One-off" },
+                    ...(isOneToOneForm ? [] : [{ value: "one-off", label: "One-off" }]),
                     { value: "weekly", label: "Weekly" },
                     { value: "fortnightly", label: "Fortnightly" },
                     { value: "monthly", label: "Monthly" },
@@ -974,7 +1229,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                   )}
                 </div>
 
-                <OutputBox title="Meeting agenda" content={prepResult.agenda} badge={{ color: "teal", label: "Share in advance" }} spoken />
+                <OutputBox title={prepResult.meetingType === "oneToOne" && oneCtx ? `Agenda for ${oneCtx.person.first_name}` : "Meeting agenda"} content={prepResult.agenda} badge={{ color: "teal", label: "Share in advance" }} spoken />
                 <OutputBox title="Facilitation guide" content={prepResult.guide} badge={{ color: "blue", label: "Manager only" }} />
 
                 {/* Prompt to move to close stage */}
