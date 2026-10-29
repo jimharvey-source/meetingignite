@@ -256,3 +256,29 @@ export function parseQuestions(block) {
   }
   return qs;
 }
+
+// ---------------------------------------------------------------------
+// The close: the meeting writes back
+// ---------------------------------------------------------------------
+
+/**
+ * Write the close in one pass: each reviewed action, each new action and who
+ * came. One database transaction (app.close_meeting): all of it or none.
+ */
+export async function closeMeeting(client, sessionId, { reviews = [], newActions = [], participants = [] }) {
+  if (!sessionId) return { data: null, error: new Error('There is no saved meeting to close.') };
+  const { data, error } = await client.schema('app').rpc('close_meeting', {
+    p_session: sessionId,
+    p_reviews: reviews,
+    p_new_actions: newActions,
+    p_participants: participants,
+  });
+  if (error || !data) {
+    console.error('closeMeeting failed:', error?.message || 'no answer');
+    return { data: null, error: error || new Error('The close was not confirmed.') };
+  }
+  if (data.reviewed !== reviews.length || data.participants !== participants.length) {
+    console.error('closeMeeting: counts do not match what was sent', data, reviews.length, participants.length);
+  }
+  return { data, error: null };
+}

@@ -4,7 +4,22 @@ import { createSuiteClient, hasSuiteAccess, parseSharpened, personIdFromUrl } fr
 import {
   saveMeeting, updateMeetingOutputs, listMeetings,
   listTeam, loadPersonContext, assembleOneToOne, buildOneToOneAgenda, parseQuestions,
+  closeMeeting,
 } from "./meeting-record.js";
+
+// "13 November" from "2026-11-13"; empty when there is no date.
+const ukDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GB", { day: "numeric", month: "long" });
+};
+
+const OUTCOMES = [
+  { value: "done", label: "Done" },
+  { value: "carried", label: "Carried" },
+  { value: "changed", label: "Changed" },
+  { value: "dropped", label: "Dropped" },
+];
 
 
 // The way back to the app, from the header and from the end of every result.
@@ -334,6 +349,94 @@ function OneToOnePanel({ user, team, teamState, personId, onPerson, ctx, ctxStat
   );
 }
 
+// ─── The close: review each action, add new ones, say who came ───────────────
+
+const smallInput = { minHeight: 40, padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 10, fontSize: 14, color: COLORS.text, background: COLORS.white, boxSizing: "border-box", fontFamily: FONT.sans };
+const sectionLabel = { display: "block", fontSize: 13, fontWeight: 600, letterSpacing: "0.01em", color: COLORS.muted, marginBottom: 8, fontFamily: FONT.sans };
+
+function ActionReview({ items, reviews, onReview, first }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <label style={sectionLabel}>Actions from {first}'s record <span style={{ color: COLORS.red2 }}>*</span></label>
+      {items.length === 0
+        ? <p style={{ fontSize: 14, color: COLORS.navyMid, margin: 0, fontFamily: FONT.sans }}>No open actions on {first}'s record.</p>
+        : <p style={{ fontSize: 14, color: COLORS.navyMid, margin: "0 0 10px", fontFamily: FONT.sans, lineHeight: "20px" }}>Mark each one. This updates {first}'s record.</p>}
+      {items.map(it => {
+        const r = reviews[it.actionId] || {};
+        const set = (patch) => onReview(it.actionId, { ...r, ...patch });
+        return (
+          <div key={it.key} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10, fontFamily: FONT.sans }}>
+            <p style={{ fontSize: 14, fontWeight: 600, color: COLORS.navy, margin: "0 0 2px" }}>{it.title}</p>
+            <p style={{ fontSize: 13, color: it.overdue ? COLORS.red2 : COLORS.muted, margin: "0 0 10px" }}>{it.due}</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {OUTCOMES.map(o => (
+                <button key={o.value} onClick={() => set({ outcome: o.value })} aria-pressed={r.outcome === o.value}
+                  style={{ minHeight: 36, padding: "6px 14px", border: `1px solid ${r.outcome === o.value ? COLORS.navy : COLORS.border}`, boxShadow: r.outcome === o.value ? `inset 0 0 0 1px ${COLORS.navy}` : "none", borderRadius: 10, background: r.outcome === o.value ? COLORS.sunk : COLORS.white, color: COLORS.navy, fontSize: 14, fontWeight: r.outcome === o.value ? 600 : 400, cursor: "pointer", fontFamily: FONT.sans }}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {r.outcome === "changed" && (
+              <input type="text" value={r.description || ""} onChange={e => set({ description: e.target.value })} placeholder="The action as it now stands"
+                aria-label="The action as it now stands" style={{ ...smallInput, width: "100%", marginTop: 10 }} />
+            )}
+            {(r.outcome === "carried" || r.outcome === "changed") && (
+              <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, fontSize: 13, color: COLORS.navyMid }}>
+                New date (optional)
+                <input type="date" value={r.due_on || ""} onChange={e => set({ due_on: e.target.value })} style={smallInput} />
+              </label>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function NewActions({ rows, onChange, first }) {
+  const update = (i, patch) => onChange(rows.map((r, j) => j === i ? { ...r, ...patch } : r));
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <label style={sectionLabel}>New actions</label>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+          <input type="text" value={r.description} onChange={e => update(i, { description: e.target.value })} placeholder={`e.g. ${first} sends the draft proposal`}
+            aria-label="What will be done" style={{ ...smallInput, width: "100%" }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select value={r.owner} onChange={e => update(i, { owner: e.target.value })} aria-label="Who owns it" style={smallInput}>
+              <option value="person">{first}</option>
+              <option value="manager">You</option>
+              <option value="shared">Both of you</option>
+            </select>
+            <input type="date" value={r.due_on} onChange={e => update(i, { due_on: e.target.value })} aria-label="By when" style={smallInput} />
+          </div>
+        </div>
+      ))}
+      <button onClick={() => onChange([...rows, { description: "", owner: "person", due_on: "" }])}
+        style={{ minHeight: 40, padding: "0 16px", background: COLORS.white, border: `1px solid ${COLORS.border}`, borderRadius: 10, color: COLORS.navy, fontSize: 14, fontWeight: 500, cursor: "pointer", fontFamily: FONT.sans }}>
+        Add another action
+      </button>
+    </div>
+  );
+}
+
+function WhoCame({ team, attendeeIds, onToggle }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <label style={sectionLabel}>Who came</label>
+      <p style={{ fontSize: 14, color: COLORS.navyMid, margin: "0 0 10px", fontFamily: FONT.sans, lineHeight: "20px" }}>Tick everyone from your team who was there. The meeting goes on each of their records.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {team.map(p => (
+          <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 14, color: COLORS.navy, cursor: "pointer", fontFamily: FONT.sans }}>
+            <input type="checkbox" checked={attendeeIds.includes(p.id)} onChange={() => onToggle(p.id)} style={{ width: 18, height: 18, accentColor: COLORS.navy }} />
+            {[p.first_name, p.last_name].filter(Boolean).join(" ")}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Auth Modal ───────────────────────────────────────────────────────────────
 
 function AuthModal({ onClose }) {
@@ -512,6 +615,13 @@ export default function MeetingIgnite() {
   const [ctxState, setCtxState] = useState("idle");
   const [included, setIncluded] = useState([]);
   const isOneToOneForm = prepForm.meetingType === "oneToOne";
+  const [reviews, setReviews] = useState({});
+  const [newActions, setNewActions] = useState([{ description: "", owner: "person", due_on: "" }]);
+  const [attendeeIds, setAttendeeIds] = useState([]);
+  // Set once the close is in the database, so a retry of the words never writes it twice.
+  const [closeWritten, setCloseWritten] = useState(null);
+  const reviewItems = (oneCtx?.items || []).filter(it => it.kind === "action");
+  const filledNewActions = newActions.filter(a => a.description.trim());
   const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("mi_pro") === "true"; } catch { return false; } });
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [user, setUser] = useState(null);
@@ -636,8 +746,32 @@ export default function MeetingIgnite() {
   };
 
   const validateClose = () => {
+    if (isOneToOneForm) {
+      if (!user) return "Sign in to close a 1-1 on the person's record.";
+      if (!savedMeeting || !oneCtx) return "Prepare the 1-1 on this page first, so the close has a meeting on the record to write to.";
+      if (closeWritten?.sessionId === savedMeeting.id) return null;
+      if (reviewItems.some(it => !reviews[it.actionId]?.outcome)) return "Mark each action from the record: done, carried, changed or dropped.";
+      if (reviewItems.some(it => reviews[it.actionId]?.outcome === "changed" && !reviews[it.actionId]?.description?.trim())) return "Write the new wording for each changed action.";
+      if (!reviewItems.length && !filledNewActions.length) return "Add at least one action agreed in the 1-1.";
+      return null;
+    }
     if (!closeForm.actionsNotes.trim()) return "Please enter the actions agreed in the meeting.";
     return null;
+  };
+
+  // The 1-1's actions, as words for the summary, from what the manager marked.
+  const oneToOneActionsText = () => {
+    const first = oneCtx?.person?.first_name || "";
+    const ownerName = { person: first, manager: prepForm.managerName.trim() || "Manager", shared: `${first} and ${prepForm.managerName.trim() || "manager"}` };
+    const lines = reviewItems.map(it => {
+      const r = reviews[it.actionId] || {};
+      if (r.outcome === "done") return `Done: ${it.title}`;
+      if (r.outcome === "dropped") return `Dropped: ${it.title}`;
+      const what = r.outcome === "changed" ? `${r.description.trim()} (was: ${it.title})` : it.title;
+      return `${r.outcome === "changed" ? "Changed" : "Carried"}: ${what}${r.due_on ? `, now due ${ukDate(r.due_on)}` : ""}`;
+    });
+    filledNewActions.forEach(a => lines.push(`New: ${a.description.trim()} - ${ownerName[a.owner] || first} - ${a.due_on ? ukDate(a.due_on) : "no date set"}`));
+    return lines.join("\n");
   };
 
   const buildOutcomeCheckPrompt = () =>
@@ -731,6 +865,8 @@ OUTPUT RULES (apply to every section below, without exception):
 - UK English throughout. Plain, direct, warm. Active voice.
 - Do not use em dashes: use a comma, a colon, or a full stop instead. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
 - Never feed ratings back: do not write "your low confidence" or "your skill level".
+- No antithesis: say what is true in one statement, without defining it against what it is not ("X, not Y", "rather than").
+- Do not imply anything happened before that THE RECORD does not show: no "again" or "as usual" about ${first}.
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
@@ -758,7 +894,7 @@ MEETING CONTEXT:
 - Original desired outcome: ${prepResult?.outcome || prepForm.desiredOutcome}
 
 WHAT THE MANAGER CAPTURED DURING THE MEETING:
-- Actions agreed: ${closeForm.actionsNotes}
+- Actions agreed: ${isOneToOneForm ? oneToOneActionsText() : closeForm.actionsNotes}
 - Decisions made: ${closeForm.decisionsNotes || "Not recorded separately"}
 - Anything unresolved: ${closeForm.anythingUnresolved || "Nothing noted"}
 
@@ -767,12 +903,14 @@ OUTPUT RULES (apply to every section below, without exception):
 - No exclamation marks. No cheerleading.
 - UK English throughout. Plain, direct, professional. Active voice.
 - In sentences, do not use em dashes: use a comma, a colon, or a full stop instead. The dash separators in the actions summary format below are the one exception and should be kept. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
+- No antithesis: say what is true in one statement, without defining it against what it is not.
+- Never invent a fact about any person: use only what the manager captured above.
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
 ACTIONS_SUMMARY: [A clean actions summary ready to send to all attendees. Write each action on its own line in the form: Action - Owner - By when (a plain hyphen between the three parts, never a long dash; this is not markdown). Use the manager's notes as the basis. For the "by when": if the manager's note gives a date or a relative time (for example "by Friday", "next week", "before the next meeting"), use it exactly as written. If no timing is given for an action, write [by when] as a plain blank for the manager to fill in. Never invent or guess a specific calendar date: do not write an absolute date that was not in the manager's notes. Begin with a brief intro line confirming the meeting outcome. Professional, clear, ready to send. Minimum 150 words.]
 
-FOLLOWUP_NOTE: [A brief follow-up note written by ${prepForm.managerName} and addressed to the whole group who attended, never to one named individual. Do not give the note a meeting label or title such as "Coaching Meeting 1": it is simply a note to the group after the meeting. Warm, direct, professional. It summarises what the meeting achieved, confirms the actions list is attached, and states the next meeting date if one is known. If the next date is not known, write [next meeting date] as a plain blank for the manager to fill in: do not invent a date. Minimum 100 words.]
+FOLLOWUP_NOTE: [${isOneToOneForm && oneCtx ? `A brief follow-up note written by ${prepForm.managerName} to ${oneCtx.person.first_name} after their 1-1, by first name. It leaves the next steps with ${oneCtx.person.first_name}.` : `A brief follow-up note written by ${prepForm.managerName} and addressed to the whole group who attended, never to one named individual.`} Do not give the note a meeting label or title such as "Coaching Meeting 1". Warm, direct, professional. It summarises what the meeting achieved, confirms the actions list is attached, and states the next meeting date if one is known. If the next date is not known, write [next meeting date] as a plain blank for the manager to fill in: do not invent a date. Minimum 100 words.]
 
 PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not for sharing. Three short observations: one thing that likely went well based on the context, one thing to watch for next time given this meeting type and group, and one specific improvement to try. Honest and practical. Minimum 80 words.]`;
 
@@ -899,6 +1037,39 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     const err = validateClose();
     if (err) { setError(err); return; }
     setLoading(true); setCloseResult(null); setError("");
+
+    // 1. The record. One transaction: every review, every new action and who came, or none of it.
+    let meeting = savedMeeting;
+    let written = closeWritten && meeting && closeWritten.sessionId === meeting.id ? closeWritten : null;
+    const whose = isOneToOneForm && oneCtx ? `${oneCtx.person.first_name}'s record` : "the record";
+    if (user && !written) {
+      if (!meeting) {
+        const { data: row, error: saveError } = await saveMeeting(supabase, {
+          title: prepForm.meetingTitle || "Meeting close-out", inputs: { ...prepForm }, outputs: {},
+        });
+        if (saveError) { setError("The meeting could not be saved, so nothing was written to the record. Try again."); setLoading(false); return; }
+        meeting = row; setSavedMeeting(row);
+      }
+      const payload = isOneToOneForm
+        ? {
+            reviews: reviewItems.map(it => {
+              const r = reviews[it.actionId];
+              return { action_id: it.actionId, outcome: r.outcome, description: r.outcome === "changed" ? r.description.trim() : "", due_on: r.due_on || "" };
+            }),
+            newActions: filledNewActions.map(a => ({ description: a.description.trim(), owner: a.owner, due_on: a.due_on || "" })),
+            participants: [{ person_id: oneCtx.person.id, role: "subject" }],
+          }
+        : { participants: attendeeIds.map(id => ({ person_id: id, role: "attendee" })) };
+      const { data: counts, error: closeError } = await closeMeeting(supabase, meeting.id, payload);
+      if (closeError) {
+        setError(`The close could not be saved, so nothing was written to ${whose}. Nothing is half done: try again.`);
+        setLoading(false); return;
+      }
+      written = { sessionId: meeting.id, counts };
+      setCloseWritten(written);
+    }
+
+    // 2. The words.
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildClosePrompt() }] }) });
       const text = await modelText(r);
@@ -920,20 +1091,23 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
       if (user) {
         // Closing a meeting prepared on this page adds to its row; a meeting
         // prepared elsewhere is saved as a new one.
-        const { data: row, error: saveError } = savedMeeting
-          ? await updateMeetingOutputs(supabase, savedMeeting, closeOutputs)
-          : await saveMeeting(supabase, {
-              title: prepResult?.meetingTitle || prepForm.meetingTitle || "Meeting close-out",
-              inputs: { ...prepForm },
-              outputs: closeOutputs,
-            });
-        if (saveError) setSaveNote("The close could not be saved to your record. Copy anything you need before you leave the page.");
-        else { setSavedMeeting(row); setSaveNote("Saved to your record."); }
+        const { data: row, error: saveError } = await updateMeetingOutputs(supabase, meeting, { ...closeOutputs, closeCounts: written?.counts || null });
+        const c = written?.counts || {};
+        const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        const what = isOneToOneForm
+          ? `${plural(c.reviewed || 0, "action", "actions")} reviewed, ${plural(c.added || 0, "new action", "new actions")}`
+          : c.participants ? `on ${plural(c.participants, "person's record", "people's records")}` : "";
+        if (saveError) setSaveNote(`The actions are saved to ${whose}. The summary below could not be saved: copy it before you leave the page.`);
+        else { setSavedMeeting(row); setSaveNote(`Saved to ${whose}${what ? `: ${what}` : ""}.`); }
       } else {
         setSaveNote("Sign in to keep this meeting on your record.");
       }
       setTimeout(() => closeResultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
-    } catch { setError("Something went wrong. Please try again."); }
+    } catch {
+      setError(written
+        ? `The actions are saved to ${whose}. The summary could not be written: press the button again to try again.`
+        : "Something went wrong. Please try again.");
+    }
     finally { setLoading(false); }
   };
 
@@ -941,6 +1115,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     setOutcomeCheck(null); setSharpenedOutcome(""); setOutcomeAccepted(false);
     setPrepResult(null); setCloseResult(null); setStage("prepare");
     setSavedMeeting(null); setSaveNote("");
+    setReviews({}); setNewActions([{ description: "", owner: "person", due_on: "" }]); setAttendeeIds([]); setCloseWritten(null);
     setCloseForm({ actionsNotes: "", decisionsNotes: "", anythingUnresolved: "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1290,14 +1465,32 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                   : "Enter what happened in the meeting to generate your actions summary and follow-up note."}
               </p>
 
-              <TextField
-                label="Actions agreed"
-                value={closeForm.actionsNotes}
-                onChange={cf("actionsNotes")}
-                placeholder="e.g. Sarah to send revised brief by Friday. Tom to book client call for w/c 7 April. All to review deck before Thursday."
-                hint="One action per line works well. Include owner and deadline where you know them."
-                required multiline
-              />
+              {isOneToOneForm && oneCtx && savedMeeting && (
+                <>
+                  <ActionReview items={reviewItems} reviews={reviews} first={oneCtx.person.first_name}
+                    onReview={(id, r) => setReviews(prev => ({ ...prev, [id]: r }))} />
+                  <NewActions rows={newActions} onChange={setNewActions} first={oneCtx.person.first_name} />
+                </>
+              )}
+              {isOneToOneForm && !(oneCtx && savedMeeting) && (
+                <p style={{ fontSize: 14, color: COLORS.navy, background: COLORS.amberLight, borderRadius: 10, padding: "12px 16px", margin: "0 0 16px", fontFamily: FONT.sans, lineHeight: "20px" }}>
+                  Prepare the 1-1 first. The close reviews the actions it carried and writes them back to the person's record.
+                </p>
+              )}
+              {!isOneToOneForm && user && team.length > 0 && (
+                <WhoCame team={team} attendeeIds={attendeeIds}
+                  onToggle={id => setAttendeeIds(list => list.includes(id) ? list.filter(x => x !== id) : [...list, id])} />
+              )}
+              {!isOneToOneForm && (
+                <TextField
+                  label="Actions agreed"
+                  value={closeForm.actionsNotes}
+                  onChange={cf("actionsNotes")}
+                  placeholder="e.g. Sarah to send revised brief by Friday. Tom to book client call for w/c 7 April. All to review deck before Thursday."
+                  hint="One action per line works well. Include owner and deadline where you know them."
+                  required multiline
+                />
+              )}
               <TextField
                 label="Key decisions made"
                 value={closeForm.decisionsNotes}
@@ -1316,7 +1509,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
 
               <button onClick={generateClose} disabled={loading}
                 style={{ width: "100%", marginTop: 8, minHeight: 52, padding: "0 24px", background: COLORS.navy, opacity: loading ? 0.7 : 1, color: "#fff", border: "none", borderRadius: 10, fontSize: 16, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: FONT.sans, transition: "opacity 0.2s" }}>
-                {loading ? "Generating your close-out..." : "Generate actions summary and follow-up"}
+                {loading ? "Saving and writing your close-out..." : isOneToOneForm ? "Save to the record and write the follow-up" : "Generate actions summary and follow-up"}
               </button>
             </div>
 
