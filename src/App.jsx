@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import MethodLink from "./MethodLink.jsx";
-import { createClient } from "@supabase/supabase-js";
-import { parseSharpened } from "./mi-session.js";
+import { createSuiteClient, hasSuiteAccess, parseSharpened } from "./mi-session.js";
+import { saveMeeting, updateMeetingOutputs, listMeetings } from "./meeting-record.js";
 
 
 // The way back to the app, from the header and from the end of every result.
@@ -11,10 +11,24 @@ const pdfName = (...parts) => parts
   .map(s => String(s || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60).trim())
   .filter(Boolean).join(" - ") + ".pdf";
 
-const supabase = createClient(
-  "https://fdiitxhgfytvlbtokbok.supabase.co",
-  "sb_publishable_JQMFDaTz5g-2ZlitosUTeA_C9B48-Lc"
-);
+// The suite client: the one sign-in across the app and all five tools.
+const supabase = createSuiteClient({
+  url: "https://fdiitxhgfytvlbtokbok.supabase.co",
+  anonKey: "sb_publishable_JQMFDaTz5g-2ZlitosUTeA_C9B48-Lc",
+});
+
+// Read the model's reply. A failed call or an empty reply is an error,
+// never a blank result shown as if it worked.
+async function modelText(r) {
+  let d = null;
+  try { d = await r.json(); } catch { /* handled below */ }
+  const text = d?.choices?.[0]?.message?.content || "";
+  if (!r.ok || !text.trim()) {
+    console.error("generate failed:", r.status, d?.error || "empty reply");
+    throw new Error("generate failed");
+  }
+  return text;
+}
 
 // Management Ignition design system, 4 October 2026. Same names, new values.
 // Teal (accent) is the method speaking: never a button fill, never a link.
@@ -156,14 +170,6 @@ function generateICS({ meetingTitle, managerName, cadence, frequency }) {
 
 function getUsageCount() { try { return parseInt(localStorage.getItem("mi_usage") || "0"); } catch { return 0; } }
 function incrementUsage() { try { localStorage.setItem("mi_usage", String(getUsageCount() + 1)); } catch {} }
-function getSavedSessions() { try { return JSON.parse(localStorage.getItem("mi_saved") || "[]"); } catch { return []; } }
-function saveLocalSession(data) {
-  try {
-    const s = getSavedSessions();
-    s.unshift({ ...data, id: Date.now(), date: new Date().toLocaleDateString("en-GB") });
-    localStorage.setItem("mi_saved", JSON.stringify(s.slice(0, 20)));
-  } catch {}
-}
 
 const FREE_LIMIT = 3;
 
@@ -345,7 +351,7 @@ function UpgradeModal({ onClose, triggered }) {
 
 // ─── History Panel ────────────────────────────────────────────────────────────
 
-function HistoryPanel({ items, onClose }) {
+function HistoryPanel({ items, state, user, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(27,42,74,0.45)", display: "flex", justifyContent: "flex-end", zIndex: 1000 }}>
       <div style={{ background: COLORS.white, width: "100%", maxWidth: 460, height: "100vh", overflowY: "auto", padding: "28px 24px", fontFamily: FONT.sans }}>
@@ -353,19 +359,32 @@ function HistoryPanel({ items, onClose }) {
           <h3 style={{ fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: 0 }}>Meeting history</h3>
           <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", fontSize: 24, minWidth: 44, minHeight: 44, cursor: "pointer", color: COLORS.navy, fontFamily: FONT.sans }}>×</button>
         </div>
-        {items.length === 0
+        {!user
+          ? <p style={{ color: COLORS.muted, fontSize: 14 }}>Sign in to see the meetings on your record.</p>
+          : state === "loading"
+          ? <p style={{ color: COLORS.muted, fontSize: 14 }}>Loading your meetings...</p>
+          : state === "error"
+          ? <p role="alert" style={{ color: COLORS.red2, fontSize: 14 }}>Your meetings could not be loaded. Close this and try again.</p>
+          : items.length === 0
           ? <p style={{ color: COLORS.muted, fontSize: 14 }}>No saved meetings yet.</p>
           : items.map(item => (
             <div key={item.id} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.navy }}>{item.meetingTitle || "Untitled meeting"}</span>
-                <span style={{ fontSize: 12, color: COLORS.muted }}>{item.date || ""}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 4 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: COLORS.navy }}>{item.title || "Untitled meeting"}</span>
+                <span style={{ fontSize: 12, color: COLORS.muted, whiteSpace: "nowrap" }}>{item.occurred_at ? new Date(item.occurred_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : ""}</span>
               </div>
-              <p style={{ fontSize: 13, color: COLORS.muted, margin: "0 0 6px" }}>{item.managerName}</p>
-              {item.meetingType && <Badge color="blue">{MEETING_TYPES[item.meetingType]?.label || item.meetingType}</Badge>}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {item.inputs?.meetingType && <Badge color="blue">{MEETING_TYPES[item.inputs.meetingType]?.label || item.inputs.meetingType}</Badge>}
+                {(item.outputs?.actionsList) && <Badge color="green">Closed</Badge>}
+              </div>
             </div>
           ))
         }
+        {user && (
+          <p style={{ fontSize: 13, color: COLORS.muted, margin: "16px 0 0", lineHeight: 1.5 }}>
+            Every meeting is also on your <a href={DASHBOARD_URL} style={{ color: COLORS.navyMid, textUnderlineOffset: 4 }}>dashboard</a> under Recent work.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -381,7 +400,7 @@ export default function MeetingIgnite() {
   const [prepForm, setPrepForm] = useState({
     managerName: "", meetingTitle: "", meetingType: "",
     desiredOutcome: "", attendees: "", duration: "",
-    groupExperience: "", frequency: "", saveLocally: false,
+    groupExperience: "", frequency: "",
   });
 
   // Close form (actions captured after the meeting)
@@ -398,7 +417,11 @@ export default function MeetingIgnite() {
   const [showHistory, setShowHistory] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [usageCount, setUsageCount] = useState(getUsageCount());
-  const [history, setHistory] = useState(getSavedSessions());
+  const [history, setHistory] = useState([]);
+  const [historyState, setHistoryState] = useState("idle");
+  // The meeting as saved on the record: the close is added to the same row.
+  const [savedMeeting, setSavedMeeting] = useState(null);
+  const [saveNote, setSaveNote] = useState("");
   const [isPro, setIsPro] = useState(() => { try { return localStorage.getItem("mi_pro") === "true"; } catch { return false; } });
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const [user, setUser] = useState(null);
@@ -419,6 +442,23 @@ export default function MeetingIgnite() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // The suite: a subscription or code access is the one check, replacing the local flag.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    hasSuiteAccess(supabase).then(paid => { if (!cancelled && paid) setIsPro(true); });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  const openHistory = async () => {
+    setShowHistory(true);
+    if (!user) return;
+    setHistoryState("loading");
+    const { data, error: listError } = await listMeetings(supabase);
+    setHistory(data);
+    setHistoryState(listError ? "error" : "ready");
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -551,8 +591,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
       setLoading(true); setOutcomeCheck(null);
       try {
         const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildOutcomeCheckPrompt() }] }) });
-        const d = await r.json();
-        const text = d.choices?.[0]?.message?.content || "";
+        const text = await modelText(r);
         const status = (text.match(/STATUS:\s*(PASS|FAIL)/i)?.[1] || "PASS").toUpperCase();
         const reason = text.match(/REASON:\s*(.+)/i)?.[1]?.trim() || "";
         const sharpened = parseSharpened(text, prepForm.desiredOutcome, 250);
@@ -568,8 +607,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     setLoading(true); setPrepResult(null);
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildPrepPrompt(outcome) }] }) });
-      const d = await r.json();
-      const text = d.choices?.[0]?.message?.content || "";
+      const text = await modelText(r);
       const noteMatch = text.match(/FACILITATOR_NOTE:\s*([\s\S]+?)(?=AGENDA:|$)/i);
       const agendaMatch = text.match(/AGENDA:\s*([\s\S]+?)(?=FACILITATION_GUIDE:|$)/i);
       const guideMatch = text.match(/FACILITATION_GUIDE:\s*([\s\S]+)/i);
@@ -586,7 +624,24 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
       };
       setPrepResult(parsed);
       if (!isPro) { incrementUsage(); setUsageCount(getUsageCount()); }
-      if (prepForm.saveLocally) { saveLocalSession({ meetingTitle: prepForm.meetingTitle, managerName: prepForm.managerName, meetingType: prepForm.meetingType }); setHistory(getSavedSessions()); }
+      setSavedMeeting(null);
+      if (user) {
+        const { data: row, error: saveError } = await saveMeeting(supabase, {
+          title: parsed.meetingTitle,
+          inputs: { ...prepForm, desiredOutcome: outcome },
+          outputs: {
+            facilitatorNote: parsed.facilitatorNote,
+            agenda: parsed.agenda,
+            facilitationGuide: parsed.guide,
+            facilitationMode: parsed.facilitationMode,
+            meetingCadence: parsed.cadence,
+          },
+        });
+        if (saveError) setSaveNote("This meeting could not be saved to your record. Copy anything you need before you leave the page.");
+        else { setSavedMeeting(row); setSaveNote("Saved to your record."); }
+      } else {
+        setSaveNote("Sign in to keep this meeting on your record.");
+      }
       setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch { setError("Something went wrong. Please try again."); }
     finally { setLoading(false); }
@@ -598,16 +653,37 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     setLoading(true); setCloseResult(null); setError("");
     try {
       const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: buildClosePrompt() }] }) });
-      const d = await r.json();
-      const text = d.choices?.[0]?.message?.content || "";
+      const text = await modelText(r);
       const actionsMatch = text.match(/ACTIONS_SUMMARY:\s*([\s\S]+?)(?=FOLLOWUP_NOTE:|$)/i);
       const followupMatch = text.match(/FOLLOWUP_NOTE:\s*([\s\S]+?)(?=PROCESS_REVIEW:|$)/i);
       const reviewMatch = text.match(/PROCESS_REVIEW:\s*([\s\S]+)/i);
-      setCloseResult({
+      const closed = {
         actions: actionsMatch?.[1]?.trim() || text,
         followup: followupMatch?.[1]?.trim() || "",
         review: reviewMatch?.[1]?.trim() || "",
-      });
+      };
+      setCloseResult(closed);
+      const closeOutputs = {
+        closeNotes: { ...closeForm },
+        actionsList: closed.actions,
+        followUp: closed.followup,
+        processReview: closed.review,
+      };
+      if (user) {
+        // Closing a meeting prepared on this page adds to its row; a meeting
+        // prepared elsewhere is saved as a new one.
+        const { data: row, error: saveError } = savedMeeting
+          ? await updateMeetingOutputs(supabase, savedMeeting, closeOutputs)
+          : await saveMeeting(supabase, {
+              title: prepResult?.meetingTitle || prepForm.meetingTitle || "Meeting close-out",
+              inputs: { ...prepForm },
+              outputs: closeOutputs,
+            });
+        if (saveError) setSaveNote("The close could not be saved to your record. Copy anything you need before you leave the page.");
+        else { setSavedMeeting(row); setSaveNote("Saved to your record."); }
+      } else {
+        setSaveNote("Sign in to keep this meeting on your record.");
+      }
       setTimeout(() => closeResultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch { setError("Something went wrong. Please try again."); }
     finally { setLoading(false); }
@@ -616,6 +692,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
   const resetAll = () => {
     setOutcomeCheck(null); setSharpenedOutcome(""); setOutcomeAccepted(false);
     setPrepResult(null); setCloseResult(null); setStage("prepare");
+    setSavedMeeting(null); setSaveNote("");
     setCloseForm({ actionsNotes: "", decisionsNotes: "", anythingUnresolved: "" });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -653,7 +730,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
     <div style={{ fontFamily: FONT.sans, background: COLORS.canvas, color: COLORS.text, minHeight: "100vh" }}>
 
       {showUpgrade && <UpgradeModal onClose={() => setShowUpgrade(false)} triggered={upgradeTrigger} />}
-      {showHistory && <HistoryPanel items={history} onClose={() => setShowHistory(false)} />}
+      {showHistory && <HistoryPanel items={history} state={historyState} user={user} onClose={() => setShowHistory(false)} />}
       {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
       {showSuccessBanner && (
         <div style={{ background: COLORS.tealLight, padding: "12px 24px", textAlign: "center" }}>
@@ -673,7 +750,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <a href={DASHBOARD_URL} style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans, textDecoration: "none" }}>Back to dashboard</a>
             <MethodLink slug="meetings" style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans }} />
-            <button onClick={() => setShowHistory(true)} style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans }}>History</button>
+            <button onClick={openHistory} style={{ background: "none", border: "none", color: COLORS.navyMid, fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 6px", fontFamily: FONT.sans }}>History</button>
             {user ? (
               <>
                 <span style={{ fontSize: 13, color: COLORS.muted, fontFamily: FONT.sans }}>{user.email}</span>
@@ -813,10 +890,9 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
               )}
 
               <div style={{ borderTop: `1px solid ${COLORS.border}`, paddingTop: 16, marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14, color: COLORS.navyMid, fontFamily: FONT.sans }}>
-                  <input type="checkbox" checked={prepForm.saveLocally} onChange={e => setPrepForm(p => ({ ...p, saveLocally: e.target.checked }))} style={{ width: 18, height: 18, accentColor: COLORS.navy }} />
-                  Save this meeting to history
-                </label>
+                <p style={{ fontSize: 14, color: COLORS.navyMid, margin: 0, fontFamily: FONT.sans }}>
+                  {user ? "The meeting is saved to your record when the guide is ready." : "Sign in to keep this meeting on your record."}
+                </p>
                 {error && <p style={{ fontSize: 13, color: COLORS.red2, margin: 0, fontFamily: FONT.sans }}>{error}</p>}
               </div>
 
@@ -867,6 +943,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                   <h2 style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: COLORS.navy, margin: 0, fontFamily: FONT.sans }}>Your meeting guide</h2>
                   <Badge color="green">Ready to use</Badge>
                 </div>
+                {saveNote && <p role={saveNote.startsWith("Saved") ? undefined : "alert"} style={{ fontSize: 14, color: saveNote.startsWith("Saved") ? COLORS.green : COLORS.red2, margin: "0 0 16px", fontFamily: FONT.sans }}>{saveNote}</p>}
 
                 {/* Facilitator note */}
                 {prepResult.facilitatorNote && (
@@ -995,6 +1072,7 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
                   <h2 style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", color: COLORS.navy, margin: 0, fontFamily: FONT.sans }}>Meeting close-out</h2>
                   <Badge color="green">Ready to send</Badge>
                 </div>
+                {saveNote && <p role={saveNote.startsWith("Saved") ? undefined : "alert"} style={{ fontSize: 14, color: saveNote.startsWith("Saved") ? COLORS.green : COLORS.red2, margin: "0 0 16px", fontFamily: FONT.sans }}>{saveNote}</p>}
 
                 <OutputBox title="Actions summary" content={closeResult.actions} badge={{ color: "teal", label: "Share with everyone" }} spoken />
                 <OutputBox title="Follow-up note" content={closeResult.followup} badge={{ color: "teal", label: "Send to the group" }} spoken />

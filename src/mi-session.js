@@ -200,14 +200,177 @@ export function sourceSessionIdFromUrl() {
 
 /** Load one saved session, so a tool can start from what another one produced. */
 export async function loadSession(client, sessionId) {
-  if (!sessionId) return null;
-  const { data } = await client
+  const { session } = await loadSourceSession(client, sessionId);
+  return session;
+}
+
+// ---------------------------------------------------------------------
+// The chain: one tool hands what it decided to the next
+//
+// Only ids travel on the link, each checked as a UUID, under our own mi_
+// names. Never ?code=, which is Supabase's own sign-in parameter.
+// ---------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const TOOL_URLS = {
+  goal: 'https://goal.management-ignition.com',
+  delegate: 'https://delegate.management-ignition.com',
+  feedback: 'https://feedback.management-ignition.com',
+  coach: 'https://coach.management-ignition.com',
+  meeting: 'https://meeting.management-ignition.com',
+};
+
+/** The thread the last tool handed over, if any. */
+export function threadIdFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const id = new URLSearchParams(window.location.search).get('mi_thread');
+  return UUID_RE.test(id || '') ? id : null;
+}
+
+/**
+ * The address of the next tool, carrying the person, the session it came
+ * from and the thread. Throws on an unknown tool or a malformed id, so a
+ * broken hand-over fails where it is made, not two screens later.
+ */
+export function chainUrl(tool, { personId, fromSessionId, threadId } = {}) {
+  const base = TOOL_URLS[tool];
+  if (!base) throw new Error(`chainUrl: unknown tool "${tool}".`);
+  const u = new URL(base);
+  const put = (name, value) => {
+    if (!value) return;
+    if (!UUID_RE.test(value)) throw new Error(`chainUrl: ${name} is not a valid id.`);
+    u.searchParams.set(name, value);
+  };
+  put('mi_person', personId);
+  put('mi_from', fromSessionId);
+  put('mi_thread', threadId);
+  return u.toString();
+}
+
+/**
+ * Open the next tool in this tab. Called only once the source session is
+ * saved and its id is in hand: pass that id, never a value read from state.
+ * Same tab, because a new window opened after an await is blocked as a pop-up.
+ */
+export function openNextTool(tool, ids) {
+  window.location.assign(chainUrl(tool, ids));
+}
+
+/**
+ * Forget the hand-over once the manager starts something new on the same page,
+ * so a fresh piece of work is not filed under the last one.
+ */
+export function clearChainFromUrl() {
+  if (typeof window === 'undefined') return;
+  const u = new URL(window.location.href);
+  ['mi_from', 'mi_thread'].forEach((k) => u.searchParams.delete(k));
+  window.history.replaceState(null, '', u.toString());
+}
+
+/**
+ * Load the session a hand-over came from. Answers { session, error }, so the
+ * caller can tell "nothing to load" from "the load failed". A missing session
+ * is an error here: the link promised one.
+ */
+export async function loadSourceSession(client, sessionId) {
+  if (!sessionId) return { session: null, error: null };
+  const { data, error } = await client
     .schema('app')
     .from('sessions')
-    .select('id, tool, title, person_id, inputs, outputs, occurred_at')
+    .select('id, tool, title, person_id, thread_id, inputs, outputs, occurred_at')
     .eq('id', sessionId)
     .maybeSingle();
-  return data || null;
+  if (error) {
+    console.error('loadSourceSession failed:', error.message);
+    return { session: null, error };
+  }
+  if (!data) {
+    console.error('loadSourceSession: no session with that id for this account.', sessionId);
+    return { session: null, error: new Error('The session this came from could not be found.') };
+  }
+  return { session: data, error: null };
+}
+
+/**
+ * Skill and confidence on the one shared scale: Low, Medium, High.
+ * Feedback's old 1 to 5 sessions read as 1 or 2 Low, 3 Medium, 4 or 5 High.
+ * Anything else reads as not recorded.
+ */
+export function toLevel(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const n = Number(value);
+  if (Number.isInteger(n) && n >= 1 && n <= 5) return n <= 2 ? 'Low' : n === 3 ? 'Medium' : 'High';
+  const w = String(value).trim().toLowerCase();
+  if (w === 'low' || w === 'medium' || w === 'high') return w[0].toUpperCase() + w.slice(1);
+  return '';
+}
+
+const SESSION_NOUN = { goal: 'goal', delegate: 'delegation', feedback: 'feedback', coach: 'coaching', meeting: 'meeting' };
+
+/** "From Sarah's goal, 3 November": the line at the top of a tool opened by a hand-over. */
+export function fromLine(session, firstName) {
+  const noun = SESSION_NOUN[session?.tool] || 'work';
+  const when = session?.occurred_at
+    ? new Date(session.occurred_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
+    : '';
+  const whose = firstName ? `${firstName}'s` : 'the';
+  return `From ${whose} ${noun}${when ? `, ${when}` : ''}`;
+}
+
+/**
+ * What one session hands to the next. Every value is the manager's own text,
+ * exactly as saved. Nothing here is written by a model.
+ */
+export function carriedFrom(session) {
+  if (!session) return null;
+  const i = session.inputs || {};
+  const o = session.outputs || {};
+  const text = (v) => (typeof v === 'string' ? v.trim() : '');
+  let subject = '';
+  let items = [];
+  let level = null;
+  if (session.tool === 'goal') {
+    subject = text(i.goalTitle);
+    items = [
+      ['The goal', i.goalTitle],
+      ['What it involves', i.goalDescription],
+      ['Success looks like', i.successCriteria],
+      ['By', i.deadline],
+      ['Stretch', i.stretchLevel],
+      ['Challenge zone', o.challengeZone && o.challengeZone.zone],
+    ];
+  } else if (session.tool === 'delegate') {
+    subject = text(i.taskTitle);
+    level = Number(o.delegationLevel) || null;
+    items = [
+      ['The task', i.taskTitle],
+      ['What was agreed', i.outcomes],
+      ['Level agreed', level ? `Level ${level}` : ''],
+      ['Check in by', i.deadline],
+    ];
+  } else if (session.tool === 'feedback') {
+    subject = text(i.subject);
+    items = [
+      ['About', i.subject],
+      ['Your feedback notes', i.inputText],
+    ];
+  } else if (session.tool === 'coach') {
+    subject = text(i.coachingTopic);
+    items = [
+      ['Coaching topic', i.coachingTopic],
+      ['Context', i.context],
+    ];
+  }
+  return {
+    tool: session.tool,
+    noun: SESSION_NOUN[session.tool] || 'work',
+    subject,
+    level,
+    skill: toLevel(i.skillLevel ?? i.skill),
+    confidence: toLevel(i.confidenceLevel ?? i.confidence),
+    items: items.map(([k, v]) => [k, text(v)]).filter(([, v]) => v),
+  };
 }
 
 /** Read a person's context so a tool can pre-fill its personal fields. */
@@ -223,13 +386,31 @@ export async function loadPerson(client, personId) {
 }
 
 /**
- * Save a finished tool run to a person's record.
+ * A thread's name: the subject of the session that started it, as the manager
+ * wrote it, cut to about eight words. Never written by the model.
+ */
+export function threadTitleFrom(text, maxWords = 8) {
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return '';
+  const cut = words.slice(0, maxWords).join(' ').replace(/[.,;:!?]+$/, '');
+  return words.length > maxWords ? `${cut}…` : cut;
+}
+
+/**
+ * Save a finished tool run to a person's record, inside its thread.
+ *
+ * A session handed over from another joins that session's thread. One
+ * started from scratch opens a new thread named from its own subject.
+ * If the source session cannot be read, nothing is saved: a new thread
+ * would quietly split one piece of work in two.
  *
  * @param {object} client
  * @param {object} args
  * @param {'goal'|'delegate'|'feedback'|'coach'|'meeting'} args.tool
  * @param {string}  args.personId
  * @param {string} [args.title]
+ * @param {string} [args.threadSubject]    what a new thread is named from; defaults to title
+ * @param {string} [args.threadId]         defaults to mi_thread on the link
  * @param {object} [args.inputs]           the form, as it stood
  * @param {object} [args.outputs]          both outputs, plus guide/cadence
  * @param {string} [args.sourceSessionId]  where this came from, for the chain
@@ -238,15 +419,53 @@ export async function saveToolSession(client, args) {
   const { data: { user } } = await client.auth.getUser();
   if (!user) return { data: null, error: new Error('Not signed in.') };
 
-  return client.schema('app').from('sessions').insert({
+  // The session this came from: named by the tool, or carried on the link.
+  const sourceSessionId = args.sourceSessionId || sourceSessionIdFromUrl();
+  let threadId = null;
+  if (sourceSessionId) {
+    const { session, error } = await loadSourceSession(client, sourceSessionId);
+    if (error) return { data: null, error };
+    threadId = session.thread_id || null;
+  }
+  if (!threadId) threadId = args.threadId || threadIdFromUrl() || null;
+
+  let openedThreadId = null;
+  if (!threadId) {
+    const title = threadTitleFrom(args.threadSubject || args.title) || 'Untitled piece of work';
+    const { data: thread, error: threadError } = await client.schema('app').from('threads').insert({
+      account_id: user.id,
+      person_id: args.personId || null,
+      title,
+    }).select('id').maybeSingle();
+    if (threadError || !thread) {
+      console.error('saveToolSession: the thread was not opened:', threadError?.message);
+      return { data: null, error: threadError || new Error('The thread was not opened.') };
+    }
+    threadId = thread.id;
+    openedThreadId = thread.id;
+  }
+
+  const result = await client.schema('app').from('sessions').insert({
     account_id: user.id,
     person_id: args.personId || null,
+    thread_id: threadId,
     tool: args.tool,
     title: args.title || null,
     inputs: args.inputs || {},
     outputs: args.outputs || {},
-    source_session_id: args.sourceSessionId || null,
+    source_session_id: sourceSessionId || null,
   }).select().maybeSingle();
+
+  if (result.error || !result.data) {
+    console.error('saveToolSession: the session was not saved:', result.error?.message);
+    // Leave no empty thread behind.
+    if (openedThreadId) {
+      const { error: undoError } = await client.schema('app').from('threads').delete().eq('id', openedThreadId);
+      if (undoError) console.error('saveToolSession: an empty thread was left behind:', openedThreadId, undoError.message);
+    }
+    return { data: null, error: result.error || new Error('The session was not returned.') };
+  }
+  return result;
 }
 
 /** Record something the manager and the person agreed to do. */
