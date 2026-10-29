@@ -905,6 +905,7 @@ OUTPUT RULES (apply to every section below, without exception):
 - In sentences, do not use em dashes: use a comma, a colon, or a full stop instead. The dash separators in the actions summary format below are the one exception and should be kept. Do not use the words "leverage", "empower", "unlock", "journey", "delve", "robust", "seamless", "inspire", or the phrase "moving forward".
 - No antithesis: say what is true in one statement, without defining it against what it is not.
 - Never invent a fact about any person: use only what the manager captured above.
+- Add no commitment, plan or intention for anyone, the manager included, that is not in the notes above.
 
 YOUR RESPONSE MUST USE EXACTLY THIS FORMAT:
 
