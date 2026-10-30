@@ -1095,11 +1095,15 @@ PROCESS_REVIEW: [Brief coaching notes for ${prepForm.managerName}: private, not 
         const { data: row, error: saveError } = await updateMeetingOutputs(supabase, meeting, { ...closeOutputs, closeCounts: written?.counts || null });
         const c = written?.counts || {};
         const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-        const what = isOneToOneForm
-          ? `${plural(c.reviewed || 0, "action", "actions")} reviewed, ${plural(c.added || 0, "new action", "new actions")}`
-          : c.participants ? `on ${plural(c.participants, "person's record", "people's records")}` : "";
+        // A team meeting names who it was saved to: "Tom's and Priya's records".
+        const names = attendeeIds.map(id => team.find(p => p.id === id)?.first_name).filter(Boolean).map(n => `${n}'s`);
+        const onRecords = names.length === 0 ? "" : names.length === 1 ? `${names[0]} record`
+          : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} records`;
+        const note = isOneToOneForm
+          ? `Saved to ${whose}: ${plural(c.reviewed || 0, "action", "actions")} reviewed, ${plural(c.added || 0, "new action", "new actions")}.`
+          : onRecords ? `Saved to your record and to ${onRecords}.` : "Saved to your record.";
         if (saveError) setSaveNote(`The actions are saved to ${whose}. The summary below could not be saved: copy it before you leave the page.`);
-        else { setSavedMeeting(row); setSaveNote(`Saved to ${whose}${what ? `: ${what}` : ""}.`); }
+        else { setSavedMeeting(row); setSaveNote(note); }
       } else {
         setSaveNote("Sign in to keep this meeting on your record.");
       }
